@@ -27,30 +27,30 @@ async def lifespan(app: FastAPI):
     yield
     print("🛑 Application shutdown...")
 
-
-# --- Firebase Admin SDK Initialization ---
+# --- Firebase Initialization ---
 try:
     firebase_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+
     if firebase_json:
+        # Render se environment variable load karte hain
         creds_dict = json.loads(firebase_json)
-        temp_path = "/tmp/firebase.json"
+        temp_path = "/tmp/firebase.json"  # Render temporary storage
         with open(temp_path, "w") as f:
             json.dump(creds_dict, f)
         cred = credentials.Certificate(temp_path)
         firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized successfully on Render.")
+        print("✅ Firebase initialized successfully from environment variable on Render.")
+    elif SDK_PATH.exists():
+        # Local development ke liye fallback
+        cred = credentials.Certificate(SDK_PATH)
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase initialized from local 'firebase-sdk.json' file.")
     else:
-        if SDK_PATH.exists():
-            cred = credentials.Certificate(SDK_PATH)
-            firebase_admin.initialize_app(cred)
-            print("✅ Firebase initialized from local SDK file.")
-        else:
-            print(f"⚠️ Firebase credentials not found. Please set GOOGLE_APPLICATION_CREDENTIALS_JSON in Render.")
+        print("⚠️ Firebase credentials not found! Please set GOOGLE_APPLICATION_CREDENTIALS_JSON in Render settings.")
 except Exception as e:
     print(f"❌ Firebase initialization failed: {e}")
 
-
-# --- App Definition ---
+# --- FastAPI App Definition ---
 app = FastAPI(
     title="NeoCart API",
     description="Backend API for the NeoCart e-commerce platform.",
@@ -61,7 +61,7 @@ app = FastAPI(
 # --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all for now
+    allow_origins=["*"],  # Allow all origins for testing and production simplicity
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,32 +69,34 @@ app.add_middleware(
 
 # --- API Routers ---
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(api_routes.router, prefix="/api", tags=["API Routes"])
+app.include_router(api_routes.router, prefix="/api", tags=["API"])
 
-# --- React Frontend (dist folder serve) ---
+# --- React Frontend Serve (dist build folder) ---
 assets_path = os.path.join(BASE_DIR, "dist", "assets")
+
 if not os.path.exists(assets_path):
-    print(f"⚠️ WARNING: Directory not found at '{assets_path}'. Static files may not serve correctly.")
+    print(f"⚠️ WARNING: '{assets_path}' not found. React assets may not load properly.")
 
 app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
+    """
+    Serve the React app's index.html for any path not matching an API route.
+    """
     html_file_path = os.path.join(BASE_DIR, "dist", "index.html")
     if os.path.exists(html_file_path):
         return FileResponse(html_file_path)
     else:
         print(f"❌ ERROR: index.html not found at '{html_file_path}'")
-        return {"error": "index.html not found. Run 'npm run build' and move 'dist' folder inside 'backend'."}
+        return {"error": "index.html not found. Please run 'npm run build' and move 'dist' to 'backend'."}
 
-
-# --- Root Endpoint ---
+# --- Root API Endpoint ---
 @app.get("/api")
 async def root():
     return {"message": "🚀 NeoCart API running successfully!"}
 
-
-# --- Run (For Local Development Only) ---
+# --- Run App (local only, Render uses auto command) ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("backend.main:app", host="0.0.0.0", port=port)

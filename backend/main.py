@@ -3,100 +3,90 @@ import firebase_admin
 from firebase_admin import credentials
 import pathlib
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles  # Frontend ke liye
-from fastapi.responses import FileResponse   # Frontend ke liye
-from fastapi.middleware.cors import CORSMiddleware
-import os
-import json
+from fastapi.staticfiles import StaticFiles # Frontend ke liye
+from fastapi.responses import FileResponse    # Frontend ke liye
+import os # Path join karne ke liye
 
 # Local modules
-from . import auth, api_routes
+from . import auth, api_routes 
 from .database import engine, Base
 
 # --- Paths ---
-BASE_DIR = pathlib.Path(__file__).resolve().parent
+# Yeh 'backend' folder ka poora path pata karega
+BASE_DIR = pathlib.Path(__file__).resolve().parent 
 SDK_PATH = BASE_DIR / "firebase-sdk.json"
 
 # --- FastAPI Lifespan Event ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Application startup...")
-    print("📦 Creating database tables if they don't exist...")
-    Base.metadata.create_all(bind=engine)
+    """
+    Handles startup and shutdown events for the FastAPI app.
+    """
+    # On Startup
+    print("Application startup...")
+    print("Creating database tables if they don't exist...")
+    Base.metadata.create_all(bind=engine) 
     yield
-    print("🛑 Application shutdown...")
+    # On Shutdown
+    print("Application shutdown...")
 
-# --- Firebase Initialization ---
+
+# --- Firebase Admin SDK Initialization ---
 try:
-    firebase_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    # SDK_PATH ab poore path ka istemal kar raha hai
+    cred = credentials.Certificate(SDK_PATH) 
+    firebase_admin.initialize_app(cred)
+except FileNotFoundError:
+    print(f"FATAL ERROR: '{SDK_PATH}' not found. Server cannot start.")
+    exit()
 
-    if firebase_json:
-        # Render se environment variable load karte hain
-        creds_dict = json.loads(firebase_json)
-        temp_path = "/tmp/firebase.json"  # Render temporary storage
-        with open(temp_path, "w") as f:
-            json.dump(creds_dict, f)
-        cred = credentials.Certificate(temp_path)
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized successfully from environment variable on Render.")
-    elif SDK_PATH.exists():
-        # Local development ke liye fallback
-        cred = credentials.Certificate(SDK_PATH)
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase initialized from local 'firebase-sdk.json' file.")
-    else:
-        print("⚠️ Firebase credentials not found! Please set GOOGLE_APPLICATION_CREDENTIALS_JSON in Render settings.")
-except Exception as e:
-    print(f"❌ Firebase initialization failed: {e}")
-
-# --- FastAPI App Definition ---
+# --- App Definition ---
 app = FastAPI(
     title="NeoCart API",
     description="Backend API for the NeoCart e-commerce platform.",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan 
 )
 
-# --- CORS Middleware ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for testing and production simplicity
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- API Routers ---
+# --- API Routers (Pehle) ---
+# API routes hamesha static files se *PEHLE* hone chahiye
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(api_routes.router, prefix="/api", tags=["API"])
+app.include_router(api_routes.router, prefix="/api") # All other routes
 
-# --- React Frontend Serve (dist build folder) ---
+
+# --- React Frontend (Baad mein) ---
+
+# --- YAHAN FIX KIYA GAYA HAI ---
+# BASE_DIR ka istemal karke 'dist/assets' ka poora path banaya
 assets_path = os.path.join(BASE_DIR, "dist", "assets")
 
+# Check karo ki 'dist/assets' folder hai ya nahi
 if not os.path.exists(assets_path):
-    print(f"⚠️ WARNING: '{assets_path}' not found. React assets may not load properly.")
+    print(f"WARNING: Directory not found at '{assets_path}'. Static files may not serve correctly.")
+    # Ek dummy folder bana do taaki app crash na ho (optional)
+    # os.makedirs(assets_path, exist_ok=True) 
 
 app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+# --- FIX END ---
+
 
 @app.get("/{full_path:path}")
 async def serve_react_app(full_path: str):
     """
     Serve the React app's index.html for any path not matching an API route.
     """
+    # Yahan bhi BASE_DIR ka istemal kiya
     html_file_path = os.path.join(BASE_DIR, "dist", "index.html")
+    
     if os.path.exists(html_file_path):
         return FileResponse(html_file_path)
     else:
-        print(f"❌ ERROR: index.html not found at '{html_file_path}'")
-        return {"error": "index.html not found. Please run 'npm run build' and move 'dist' to 'backend'."}
+        # Agar dist/index.html nahi mili toh error do
+        print(f"ERROR: index.html not found at '{html_file_path}'")
+        return {"error": "index.html not found. Make sure you have run 'npm run build' and moved the 'dist' folder to the 'backend' directory."}
 
-# --- Root API Endpoint ---
-@app.get("/api")
-async def root():
-    return {"message": "🚀 NeoCart API running successfully!"}
-
-# --- Run App (local only, Render uses auto command) ---
+# --- Run the app ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

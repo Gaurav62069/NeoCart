@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles 
 from fastapi.responses import FileResponse    
 import os 
-import json # <-- NAYA IMPORT (JSON string ko padhne ke liye)
+import json # JSON string ko padhne ke liye
 
 # Local modules
 from . import auth, api_routes 
@@ -17,7 +17,6 @@ from .database import engine, Base
 # --- Paths ---
 BASE_DIR = pathlib.Path(__file__).resolve().parent 
 # SDK_PATH ki ab zaroorat nahi
-# SDK_PATH = BASE_DIR / "firebase-sdk.json" 
 
 # --- FastAPI Lifespan Event ---
 @asynccontextmanager
@@ -34,7 +33,7 @@ async def lifespan(app: FastAPI):
     print("Application shutdown...")
 
 
-# --- Firebase Admin SDK Initialization (YAHAN BADLAAV KIYA GAYA HAI) ---
+# --- Firebase Admin SDK Initialization (Environment Variable se) ---
 try:
     # 1. Environment variable se JSON string ko padho
     json_string = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
@@ -69,11 +68,13 @@ app = FastAPI(
 )
 
 # --- API Routers (Pehle) ---
+# API routes hamesha static files se *PEHLE* hone chahiye
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
-app.include_router(api_routes.router, prefix="/api") 
+app.include_router(api_routes.router, prefix="/api") # All other routes
 
 
 # --- React Frontend (Baad mein) ---
+# BASE_DIR ka istemal karke 'dist/assets' ka poora path banaya
 assets_path = os.path.join(BASE_DIR, "dist", "assets")
 
 if not os.path.exists(assets_path):
@@ -87,6 +88,7 @@ async def serve_react_app(full_path: str):
     """
     Serve the React app's index.html for any path not matching an API route.
     """
+    # Yahan bhi BASE_DIR ka istemal kiya
     html_file_path = os.path.join(BASE_DIR, "dist", "index.html")
     
     if os.path.exists(html_file_path):
@@ -97,4 +99,5 @@ async def serve_react_app(full_path: str):
 
 # --- Run the app ---
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port="8000", reload=True)
+    # Port ko string se number kar do, reload=True hata do (production ke liye)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
